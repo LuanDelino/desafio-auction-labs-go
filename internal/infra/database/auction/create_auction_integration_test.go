@@ -12,8 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// novoRepositorioDeTeste conecta em um Mongo real. O teste so roda quando
-// MONGODB_URL_TEST aponta para um banco de verdade (docker compose up -d mongodb).
+// Roda apenas quando MONGODB_URL_TEST aponta para um Mongo de verdade.
 func novoRepositorioDeTeste(t *testing.T) *AuctionRepository {
 	t.Helper()
 
@@ -116,8 +115,7 @@ func TestCreateAuctionFechaSozinhoIntegracao(t *testing.T) {
 	}
 }
 
-// O ctx que chega em CreateAuction e o da requisicao HTTP, cancelado assim que a
-// resposta e devolvida. Este teste garante que o fechamento nao depende dele.
+// O ctx da requisicao morre antes do prazo; o fechamento nao pode depender dele.
 func TestCreateAuctionFechaMesmoComContextoDaRequisicaoCanceladoIntegracao(t *testing.T) {
 	t.Setenv("AUCTION_INTERVAL", "1s")
 

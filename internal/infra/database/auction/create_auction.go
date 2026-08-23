@@ -52,8 +52,7 @@ func (ar *AuctionRepository) CreateAuction(
 
 	auctionId := auctionEntity.Id
 	startAuctionCloseTimer(getAuctionInterval(), func() {
-		// Contexto proprio: o ctx da requisicao que criou o leilao ja foi
-		// cancelado quando o prazo vence, e o update morreria com ele.
+		// Contexto proprio: o ctx da requisicao ja morreu quando o prazo vence.
 		closeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -65,8 +64,6 @@ func (ar *AuctionRepository) CreateAuction(
 	return nil
 }
 
-// closeAuction marca o leilao como Completed. O filtro por status Active deixa a
-// operacao idempotente: fechar duas vezes nao sobrescreve nada.
 func (ar *AuctionRepository) closeAuction(
 	ctx context.Context, auctionId string) *internal_error.InternalError {
 	filter := bson.M{"_id": auctionId, "status": auction_entity.Active}
@@ -80,8 +77,7 @@ func (ar *AuctionRepository) closeAuction(
 	return nil
 }
 
-// getAuctionInterval devolve a duracao do leilao definida em AUCTION_INTERVAL,
-// a mesma variavel que o repositorio de lances usa para recusar lance vencido.
+// AUCTION_INTERVAL e a mesma chave usada pelo repositorio de lances.
 func getAuctionInterval() time.Duration {
 	auctionInterval := os.Getenv("AUCTION_INTERVAL")
 	duration, err := time.ParseDuration(auctionInterval)
@@ -92,8 +88,6 @@ func getAuctionInterval() time.Duration {
 	return duration
 }
 
-// startAuctionCloseTimer aguarda a duracao em segundo plano e executa a acao de
-// fechamento, sem bloquear a rotina que criou o leilao.
 func startAuctionCloseTimer(duration time.Duration, closeAction func()) {
 	go func() {
 		timer := time.NewTimer(duration)
