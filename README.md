@@ -22,21 +22,24 @@ com ele.
 docker compose up -d --build
 ```
 
-API em `http://localhost:8080`, MongoDB em `localhost:27017`. Logs com
-`docker compose logs -f app`, derrubar com `docker compose down -v`.
-
-### Seed de usuários
-
-Não existe endpoint que crie usuário, então `GET /user/:userId` só responde 404 sem
-esses registros. O script é idempotente:
+Sobem três serviços: `mongodb`, `app` (que espera o banco ficar saudável) e `seed`, um
+one-shot que insere usuários de teste e encerra. API em `http://localhost:8080`.
 
 ```sh
-docker exec -i mongodb mongosh --quiet -u admin -p admin \
-  --authenticationDatabase admin auctions --file /dev/stdin < seed.js
+docker compose logs -f app     # acompanhar
+docker compose down -v         # derrubar, apagando os dados
 ```
 
-Semeia `8b3f6f1a-1c2d-4e5f-9a70-111111111111` (Ana Souza) e
-`9c4a7e2b-2d3e-4f60-8b81-222222222222` (Bruno Lima).
+O `seed` roda a cada `compose up` e é idempotente. Para rodar por fora, ou com outros
+valores, edite `seed.js` e execute:
+
+```sh
+docker compose up seed
+```
+
+Ele cria `8b3f6f1a-1c2d-4e5f-9a70-111111111111` (Ana Souza) e
+`9c4a7e2b-2d3e-4f60-8b81-222222222222` (Bruno Lima). Sem eles, `GET /user/:userId` só
+responde 404 — o projeto não tem endpoint que crie usuário.
 
 ### Exercitando o fechamento automático
 
@@ -48,40 +51,46 @@ curl -X POST localhost:8080/auction \
   -H 'Content-Type: application/json' \
   -d '{"product_name":"Monitor Ultrawide","category":"Perifericos","description":"Monitor ultrawide 34 polegadas em bom estado","condition":2}'
 
-# pega o id na listagem (o parametro status e obrigatorio; 0 lista todos)
-curl 'localhost:8080/auction?status=0'
+# pega o id na listagem
+curl localhost:8080/auction
+
+# manda 4 lances, que é o MAX_BATCH_SIZE: o lote vai para o banco na hora
+curl -X POST localhost:8080/bid \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"8b3f6f1a-1c2d-4e5f-9a70-111111111111","auction_id":"<id>","amount":1200}'
 
 # status 0 = Active; depois de 20s o mesmo leilão volta com status 1 = Completed
 curl localhost:8080/auction/<id>
+
+# e o lance vencedor é o maior do leilão fechado
+curl localhost:8080/auction/winner/<id>
 ```
 
-Para incluir lances, atenção ao lote: os lances só vão para o banco quando juntam
-`MAX_BATCH_SIZE` (4) ou quando passa `BATCH_INSERT_INTERVAL` (20s). Um lance isolado
-perto do prazo pode ser descartado pelo próprio fechamento — mande 4 lances para
-gravar na hora, ou reduza `BATCH_INSERT_INTERVAL`.
+Com menos de 4 lances, o lote só vai para o banco quando passa `BATCH_INSERT_INTERVAL`
+(20s) — um lance isolado perto do prazo pode ser descartado pelo próprio fechamento.
 
 ### Endpoints
 
-| Método | Rota |
-|--|--|
-| POST | `/auction` — cria o leilão e agenda o fechamento |
-| GET | `/auction?status=0` — lista; `status` é obrigatório, e `0` traz todos |
-| GET | `/auction/:auctionId` |
-| GET | `/auction/winner/:auctionId` |
-| POST | `/bid` |
-| GET | `/bid/:auctionId` |
-| GET | `/user/:userId` |
+| Método | Rota | Observação |
+|--|--|--|
+| POST | `/auction` | cria o leilão e agenda o fechamento |
+| GET | `/auction` | lista todos; filtros opcionais `status`, `category`, `productName` |
+| GET | `/auction/:auctionId` | 404 se não existir |
+| GET | `/auction/winner/:auctionId` | leilão e maior lance |
+| POST | `/bid` | 404 se o leilão não existir, 400 se estiver fechado |
+| GET | `/bid/:auctionId` | lances do leilão |
+| GET | `/user/:userId` | precisa do seed |
 
 ## Variáveis de ambiente
 
-Em `cmd/auction/.env`, carregado pela aplicação e pelo `docker-compose.yml`.
+Em `cmd/auction/.env`, carregado pela aplicação e pelos serviços do compose.
 
 | Variável | Padrão | Para que serve |
 |--|--|--|
 | `AUCTION_INTERVAL` | `20s` | duração do leilão: quanto tempo após a criação ele fecha sozinho |
 | `BATCH_INSERT_INTERVAL` | `20s` | intervalo máximo até gravar o lote de lances |
 | `MAX_BATCH_SIZE` | `4` | quantidade de lances que fecha o lote antes do intervalo |
-| `MONGODB_URL` | `mongodb://admin:admin@mongodb:27017/auctions?authSource=admin` | conexão |
+| `MONGODB_URL` | `mongodb://admin:admin@mongodb:27017/auctions?authSource=admin` | conexão, usada também pelo seed |
 | `MONGODB_DB` | `auctions` | banco da aplicação |
 
 `AUCTION_INTERVAL` aceita qualquer duração no formato do Go (`30s`, `5m`, `1h30m`); se
@@ -95,17 +104,19 @@ docker compose up -d --build
 ## Testes
 
 ```sh
-# unitários, sem banco
-go test ./internal/infra/database/auction/
+# sem banco: unidade e rota
+go test ./...
 
 # com integração (precisa de um Mongo de verdade)
 docker compose up -d mongodb
 MONGODB_URL_TEST='mongodb://admin:admin@localhost:27017/auctions_test?authSource=admin' \
-  go test -v -count=1 ./internal/infra/database/auction/
+  go test -v -count=1 ./...
 ```
 
-Sem `MONGODB_URL_TEST`, os testes de integração são ignorados (`skip`). Eles usam o
-banco `auctions_test`, separado do da aplicação, e limpam a coleção antes de cada caso.
+Sem `MONGODB_URL_TEST`, os testes de integração são ignorados (`skip`). Cada pacote usa
+seu próprio banco (`auctions_test_auction`, `auctions_test_bid`), separado do banco da
+aplicação, e limpa as coleções antes de cada caso — `go test ./...` roda os pacotes em
+paralelo, então banco compartilhado entre pacotes daria teste instável.
 
 | Teste | O que prova |
 |--|--|
@@ -114,6 +125,11 @@ banco `auctions_test`, separado do da aplicação, e limpam a coleção antes de
 | `TestCloseAuctionIntegracao` | o fechamento escreve `Completed` no banco |
 | `TestCreateAuctionFechaSozinhoIntegracao` | leilão nasce `Active` e fecha sozinho após o prazo |
 | `TestCreateAuctionFechaMesmoComContextoDaRequisicaoCanceladoIntegracao` | o fechamento sobrevive ao fim da requisição HTTP |
+| `TestFindAuctionsPorStatusIntegracao` | filtra abertos, fechados, e lista todos sem filtro |
+| `TestFindAuctionByIdInexistenteIntegracao` | leilão inexistente devolve `not_found` |
+| `TestFindAuctions` (rota) | `status` opcional, e `status` inválido segue recusado |
+| `TestFindBidByAuctionIdIntegracao` | a listagem encontra os lances gravados |
+| `TestCreateBid` | recusa lance em leilão inexistente, fechado, ou com `user_id` inválido |
 
 Como a feature é concorrente, vale rodar com `-race` (exige `gcc`; sem ele, use o
 container do Go):
@@ -122,30 +138,35 @@ container do Go):
 docker run --rm -v "$PWD":/app -w /app \
   --network desafio-auction-goexpert_localNetwork \
   -e MONGODB_URL_TEST='mongodb://admin:admin@mongodb:27017/auctions_test?authSource=admin' \
-  golang:1.24 go test -race -count=1 ./internal/infra/database/auction/
+  golang:1.24 go test -race -count=1 ./...
 ```
+
+## Correções no projeto base
+
+Fora do enunciado, mas necessárias para o conjunto funcionar:
+
+- `GET /bid/:auctionId` sempre devolvia `null`: o filtro procurava `auctionId` e o
+  documento grava `auction_id`.
+- `GET /auction` respondia `400` sem o parâmetro `status`, e `?status=0` devolvia todos
+  em vez de só os abertos. Agora `status` é opcional e `0` filtra `Active`.
+- `GET /auction/:auctionId` com id inexistente respondia `500`; agora `404`, como o
+  endpoint de usuário já fazia.
+- `POST /bid` respondia `201` para leilão inexistente ou fechado e descartava o lance
+  depois, sem erro e sem log. Agora recusa na hora, com `404` ou `400`.
+- `fmt.Sprintf` com `%d` para o id do usuário, que fazia o vet embutido no `go test`
+  derrubar o build do pacote.
 
 ## Limites conhecidos
 
-Da feature, declarado de propósito para manter o escopo do desafio:
-
 - O agendamento vive no processo. Se a aplicação reiniciar antes do prazo, o leilão
   criado antes do restart permanece `Active` no banco — não há rotina de recuperação no
-  boot. O repositório de lances já recusa lance vencido por tempo, usando a mesma
+  boot. O repositório de lances recusa lance vencido por tempo, usando a mesma
   `AUCTION_INTERVAL` sobre o `timestamp` do leilão, então um leilão vencido não aceita
   lances mesmo com o status desatualizado.
-- `AUCTION_INTERVAL` é lido em dois lugares (aqui e em
+- `AUCTION_INTERVAL` é lido em dois lugares (na feature e em
   `internal/infra/database/bid/create_bid.go`, que já existia), com a mesma chave e o
   mesmo padrão. Ler chaves diferentes abriria uma janela em que o leilão aparece aberto
   e descarta lances em silêncio.
-
-Do projeto base, medidos e deixados intactos por estarem fora do desafio:
-
-- `GET /bid/:auctionId` sempre devolve `null`: o filtro procura `auctionId` e o
-  documento gravado usa `auction_id`. Os lances existem — `GET /auction/winner/:auctionId`
-  os encontra.
-- `POST /bid` responde `201` mesmo para leilão fechado ou usuário inexistente; o
-  descarte acontece depois, no processamento do lote, sem erro e sem log.
-- `GET /auction` sem `status` responde `400`, e `?status=0` devolve todos os leilões em
-  vez de só os `Active`: a listagem ignora o filtro quando o status é zero, então não há
-  como pedir apenas os leilões abertos.
+- `POST /bid` não valida se o `user_id` existe, só o formato. O projeto não tem endpoint
+  que crie usuário, então exigir usuário existente faria o seed virar dependência da
+  escrita, não conveniência de teste.
