@@ -1,7 +1,6 @@
 // Semeia usuarios para testar a API: nao existe endpoint que crie usuario, e
 // GET /user/:userId sem esses registros so responde 404.
-// Uso: docker exec -i mongodb mongosh --quiet -u admin -p admin \
-//        --authenticationDatabase admin auctions --file /dev/stdin < seed.js
+// O servico "seed" do docker-compose executa este script a cada "compose up".
 
 const users = [
   { _id: "8b3f6f1a-1c2d-4e5f-9a70-111111111111", name: "Ana Souza" },

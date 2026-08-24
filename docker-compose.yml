@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   app:
     build:
@@ -9,7 +7,9 @@ services:
       - "8080:8080"
     env_file:
       - cmd/auction/.env
-    command: sh -c "/auction"
+    depends_on:
+      mongodb:
+        condition: service_healthy
     networks:
       - localNetwork
 
@@ -22,6 +22,24 @@ services:
       - cmd/auction/.env
     volumes:
       - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - localNetwork
+
+  seed:
+    image: mongo:latest
+    env_file:
+      - cmd/auction/.env
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./seed.js:/seed.js:ro
+    command: sh -c 'mongosh --quiet "$$MONGODB_URL" --file /seed.js'
     networks:
       - localNetwork
 
