@@ -32,7 +32,7 @@ func novoRepositorioDeTeste(t *testing.T) *AuctionRepository {
 		t.Fatalf("mongo de teste nao respondeu ao ping: %v", err)
 	}
 
-	database := client.Database("auctions_test")
+	database := client.Database("auctions_test_auction")
 	repository := NewAuctionRepository(database)
 
 	if _, err := repository.Collection.DeleteMany(ctx, map[string]any{}); err != nil {
