@@ -3,6 +3,7 @@ package bid_usecase
 import (
 	"context"
 	"fullcycle-auction_go/configuration/logger"
+	"fullcycle-auction_go/internal/entity/auction_entity"
 	"fullcycle-auction_go/internal/entity/bid_entity"
 	"fullcycle-auction_go/internal/internal_error"
 	"os"
@@ -25,7 +26,8 @@ type BidOutputDTO struct {
 }
 
 type BidUseCase struct {
-	BidRepository bid_entity.BidEntityRepository
+	BidRepository     bid_entity.BidEntityRepository
+	auctionRepository auction_entity.AuctionRepositoryInterface
 
 	timer               *time.Timer
 	maxBatchSize        int
@@ -33,12 +35,15 @@ type BidUseCase struct {
 	bidChannel          chan bid_entity.Bid
 }
 
-func NewBidUseCase(bidRepository bid_entity.BidEntityRepository) BidUseCaseInterface {
+func NewBidUseCase(
+	bidRepository bid_entity.BidEntityRepository,
+	auctionRepository auction_entity.AuctionRepositoryInterface) BidUseCaseInterface {
 	maxSizeInterval := getMaxBatchSizeInterval()
 	maxBatchSize := getMaxBatchSize()
 
 	bidUseCase := &BidUseCase{
 		BidRepository:       bidRepository,
+		auctionRepository:   auctionRepository,
 		maxBatchSize:        maxBatchSize,
 		batchInsertInterval: maxSizeInterval,
 		timer:               time.NewTimer(maxSizeInterval),
@@ -108,6 +113,16 @@ func (bu *BidUseCase) CreateBid(
 	bidEntity, err := bid_entity.CreateBid(bidInputDTO.UserId, bidInputDTO.AuctionId, bidInputDTO.Amount)
 	if err != nil {
 		return err
+	}
+
+	// Sem esta checagem o lance seria aceito com 201 e descartado depois, ao
+	// processar o lote, sem erro e sem log.
+	auctionEntity, err := bu.auctionRepository.FindAuctionById(ctx, bidEntity.AuctionId)
+	if err != nil {
+		return err
+	}
+	if auctionEntity.Status == auction_entity.Completed {
+		return internal_error.NewBadRequestError("Auction is closed and does not accept bids")
 	}
 
 	bu.bidChannel <- *bidEntity
