@@ -2,12 +2,14 @@ package auction
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"fullcycle-auction_go/configuration/logger"
 	"fullcycle-auction_go/internal/entity/auction_entity"
 	"fullcycle-auction_go/internal/internal_error"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"time"
 )
 
@@ -17,6 +19,11 @@ func (ar *AuctionRepository) FindAuctionById(
 
 	var auctionEntityMongo AuctionEntityMongo
 	if err := ar.Collection.FindOne(ctx, filter).Decode(&auctionEntityMongo); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, internal_error.NewNotFoundError(
+				fmt.Sprintf("Auction not found with this id = %s", id))
+		}
+
 		logger.Error(fmt.Sprintf("Error trying to find auction by id = %s", id), err)
 		return nil, internal_error.NewInternalServerError("Error trying to find auction by id")
 	}
@@ -39,7 +46,7 @@ func (repo *AuctionRepository) FindAuctions(
 	productName string) ([]auction_entity.Auction, *internal_error.InternalError) {
 	filter := bson.M{}
 
-	if status != 0 {
+	if status != auction_entity.NoStatusFilter {
 		filter["status"] = status
 	}
 

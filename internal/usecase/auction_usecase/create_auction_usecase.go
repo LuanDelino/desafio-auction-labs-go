@@ -61,6 +61,9 @@ type AuctionUseCaseInterface interface {
 type ProductCondition int64
 type AuctionStatus int64
 
+// NoStatusFilter pede a listagem sem filtro de status.
+const NoStatusFilter = AuctionStatus(auction_entity.NoStatusFilter)
+
 type AuctionUseCase struct {
 	auctionRepositoryInterface auction_entity.AuctionRepositoryInterface
 	bidRepositoryInterface     bid_entity.BidEntityRepository

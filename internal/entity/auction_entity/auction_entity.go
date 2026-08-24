@@ -57,6 +57,9 @@ const (
 	Completed
 )
 
+// NoStatusFilter pede a listagem sem filtro de status.
+const NoStatusFilter AuctionStatus = -1
+
 const (
 	New ProductCondition = iota + 1
 	Used
